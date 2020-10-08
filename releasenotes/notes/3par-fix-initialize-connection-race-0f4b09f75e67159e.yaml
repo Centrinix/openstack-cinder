@@ -1,0 +1,7 @@
+---
+fixes:
+  - |
+    3PAR driver `bug #1885148
+    <https://bugs.launchpad.net/cinder/+bug/1885148>`_: Fix race condition on
+    concurrent volume attachments on the same host when no volumes are
+    currently attached.

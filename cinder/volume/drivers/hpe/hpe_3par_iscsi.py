@@ -36,7 +36,6 @@ except ImportError:
     hpeexceptions = None
 
 from oslo_log import log as logging
-from oslo_utils.excutils import save_and_reraise_exception
 
 from cinder.common import constants
 from cinder import coordination
@@ -48,8 +47,6 @@ from cinder.volume import volume_utils
 
 LOG = logging.getLogger(__name__)
 
-# EXISTENT_PATH error code returned from hpe3parclient
-EXISTENT_PATH = 73
 DEFAULT_ISCSI_PORT = 3260
 CHAP_USER_KEY = "HPQ-cinder-CHAP-name"
 CHAP_PASS_KEY = "HPQ-cinder-CHAP-secret"
@@ -535,56 +532,6 @@ class HPE3PARISCSIDriver(hpebasedriver.HPE3PARDriverBase):
         except Exception:
             raise
 
-    def _create_3par_iscsi_host(self, common, hostname, iscsi_iqn, domain,
-                                persona_id, remote_client=None):
-        """Create a 3PAR host.
-
-        Create a 3PAR host, if there is already a host on the 3par using
-        the same iqn but with a different hostname, return the hostname
-        used by 3PAR.
-        """
-        # first search for an existing host
-        host_found = None
-
-        if remote_client:
-            client_obj = remote_client
-        else:
-            client_obj = common.client
-
-        hosts = client_obj.queryHost(iqns=iscsi_iqn)
-
-        if hosts and hosts['members'] and 'name' in hosts['members'][0]:
-            host_found = hosts['members'][0]['name']
-
-        if host_found is not None:
-            return host_found
-        else:
-            persona_id = int(persona_id)
-            try:
-                client_obj.createHost(hostname, iscsiNames=iscsi_iqn,
-                                      optional={'domain': domain,
-                                                'persona': persona_id})
-            except hpeexceptions.HTTPConflict as path_conflict:
-                msg = "Create iSCSI host caught HTTP conflict code: %s"
-                with save_and_reraise_exception(reraise=False) as ctxt:
-                    if path_conflict.get_code() is EXISTENT_PATH:
-                        # Handle exception : EXISTENT_PATH - host WWN/iSCSI
-                        # name already used by another host
-                        hosts = client_obj.queryHost(iqns=iscsi_iqn)
-                        if hosts and hosts['members'] and (
-                                'name' in hosts['members'][0]):
-                            hostname = hosts['members'][0]['name']
-                        else:
-                            # re-raise last caught exception
-                            ctxt.reraise = True
-                            LOG.exception(msg, path_conflict.get_code())
-                    else:
-                        # re-raise last caught exception
-                        # for other HTTP conflict
-                        ctxt.reraise = True
-                        LOG.exception(msg, path_conflict.get_code())
-            return hostname
-
     def _modify_3par_iscsi_host(self, common, hostname, iscsi_iqn):
         mod_request = {'pathOperation': common.client.HOST_EDIT_ADD,
                        'iSCSINames': [iscsi_iqn]}
@@ -606,7 +553,6 @@ class HPE3PARISCSIDriver(hpebasedriver.HPE3PARDriverBase):
                      remote_target=None, src_cpg=None, remote_client=None):
         """Creates or modifies existing 3PAR host."""
         # make sure we don't have the host already
-        host = None
         domain = None
         username = None
         password = None
@@ -631,44 +577,32 @@ class HPE3PARISCSIDriver(hpebasedriver.HPE3PARDriverBase):
                 password = common.client.getVolumeMetaData(
                     vol_name, CHAP_PASS_KEY)['value']
 
-        try:
-            if remote_target:
-                host = remote_client.getHost(hostname)
-            else:
-                host = common._get_3par_host(hostname)
-                # Check whether host with iqn of initiator present on 3par
-                hosts = common.client.queryHost(iqns=[connector['initiator']])
-                host, hostname = (
-                    common._get_prioritized_host_on_3par(
-                        host, hosts, hostname))
-        except hpeexceptions.HTTPNotFound:
-            # get persona from the volume type extra specs
-            persona_id = common.get_persona_type(volume)
-            # host doesn't exist, we have to create it
-            hostname = self._create_3par_iscsi_host(common,
-                                                    hostname,
-                                                    [connector['initiator']],
-                                                    domain,
-                                                    persona_id,
-                                                    remote_client)
-        else:
-            if not remote_target:
-                if 'iSCSIPaths' not in host or len(host['iSCSIPaths']) < 1:
-                    self._modify_3par_iscsi_host(
-                        common, hostname,
-                        connector['initiator'])
-                elif (not host['initiatorChapEnabled'] and
-                        common._client_conf['hpe3par_iscsi_chap_enabled']):
-                    LOG.warning("Host exists without CHAP credentials set and "
-                                "has iSCSI attachments but CHAP is enabled. "
-                                "Updating host with new CHAP credentials.")
+        host, has_paths = self._create_3par_host(common, hostname, domain,
+                                                 volume, remote_client,
+                                                 iqns=[connector['initiator']])
+        # Update hostname variable in case we are reusing an existing host with
+        # different hostname
+        hostname = host['name']
 
-        if remote_target:
-            host = remote_client.getHost(hostname)
-        else:
+        # NOTE(geguileo): Keeping it as it is, but I believe we should be
+        # adding the initiator and chap for remotes as well, like we do in the
+        # FC driver.
+        if not remote_target:
+            if not has_paths:
+                self._modify_3par_iscsi_host(common, hostname,
+                                             connector['initiator'])
+            elif (not host.get('initiatorChapEnabled') and
+                  common._client_conf['hpe3par_iscsi_chap_enabled']):
+                LOG.warning("Host exists without CHAP credentials set and "
+                            "has iSCSI attachments but CHAP is enabled. "
+                            "Updating host with new CHAP credentials.")
             # set/update the chap details for the host
             self._set_3par_chaps(common, hostname, volume, username, password)
-            host = common._get_3par_host(hostname)
+            # NOTE: host variable is missing chap info and maybe also the
+            # iSCSIPaths, but they are not used it the code, so we don't waste
+            # time reloading.  If needed in the future, we can do here:
+            # host = common._get_3par_host(hostname)
+
         return host, username, password, cpg
 
     def _do_export(self, common, volume, connector):

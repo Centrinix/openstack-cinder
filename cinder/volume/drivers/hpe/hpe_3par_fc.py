@@ -35,7 +35,6 @@ except ImportError:
     hpeexceptions = None
 
 from oslo_log import log as logging
-from oslo_utils.excutils import save_and_reraise_exception
 
 from cinder.common import constants
 from cinder import coordination
@@ -45,9 +44,6 @@ from cinder.volume import volume_utils
 from cinder.zonemanager import utils as fczm_utils
 
 LOG = logging.getLogger(__name__)
-
-# EXISTENT_PATH error code returned from hpe3parclient
-EXISTENT_PATH = 73
 
 
 @interface.volumedriver
@@ -457,55 +453,6 @@ class HPE3PARFCDriver(hpebasedriver.HPE3PARDriverBase):
 
         return target_wwns, init_targ_map, numPaths
 
-    def _create_3par_fibrechan_host(self, common, hostname, wwns,
-                                    domain, persona_id, remote_client=None):
-        """Create a 3PAR host.
-
-        Create a 3PAR host, if there is already a host on the 3par using
-        the same wwn but with a different hostname, return the hostname
-        used by 3PAR.
-        """
-        # first search for an existing host
-        host_found = None
-
-        if remote_client:
-            client_obj = remote_client
-        else:
-            client_obj = common.client
-
-        hosts = client_obj.queryHost(wwns=wwns)
-
-        if hosts and hosts['members'] and 'name' in hosts['members'][0]:
-            host_found = hosts['members'][0]['name']
-
-        if host_found is not None:
-            return host_found
-        else:
-            persona_id = int(persona_id)
-            try:
-                client_obj.createHost(hostname, FCWwns=wwns,
-                                      optional={'domain': domain,
-                                                'persona': persona_id})
-            except hpeexceptions.HTTPConflict as path_conflict:
-                msg = "Create FC host caught HTTP conflict code: %s"
-                LOG.exception(msg, path_conflict.get_code())
-                with save_and_reraise_exception(reraise=False) as ctxt:
-                    if path_conflict.get_code() is EXISTENT_PATH:
-                        # Handle exception : EXISTENT_PATH - host WWN/iSCSI
-                        # name already used by another host
-                        hosts = client_obj.queryHost(wwns=wwns)
-                        if hosts and hosts['members'] and (
-                                'name' in hosts['members'][0]):
-                            hostname = hosts['members'][0]['name']
-                        else:
-                            # re rasise last caught exception
-                            ctxt.reraise = True
-                    else:
-                        # re rasise last caught exception
-                        # for other HTTP conflict
-                        ctxt.reraise = True
-            return hostname
-
     def _modify_3par_fibrechan_host(self, common, hostname, wwn,
                                     remote_client):
         if remote_client:
@@ -542,35 +489,15 @@ class HPE3PARFCDriver(hpebasedriver.HPE3PARDriverBase):
 
         if not connector.get('multipath'):
             connector['wwpns'] = connector['wwpns'][:1]
-        try:
-            if remote_target:
-                host = remote_client.getHost(hostname)
-            else:
-                host = common._get_3par_host(hostname)
-                # Check whether host with wwn of initiator present on 3par
-                hosts = common.client.queryHost(wwns=connector['wwpns'])
-                host, hostname = (
-                    common._get_prioritized_host_on_3par(
-                        host, hosts, hostname))
-        except hpeexceptions.HTTPNotFound:
-            # get persona from the volume type extra specs
-            persona_id = common.get_persona_type(volume)
-            # host doesn't exist, we have to create it
-            hostname = self._create_3par_fibrechan_host(common,
-                                                        hostname,
-                                                        connector['wwpns'],
-                                                        domain,
-                                                        persona_id,
-                                                        remote_client)
-            if remote_target:
-                host = remote_client.getHost(hostname)
-            else:
-                host = common._get_3par_host(hostname)
-            return host, cpg
-        else:
+
+        host, has_paths = self._create_3par_host(common, hostname, domain,
+                                                 volume, remote_client,
+                                                 wwns=connector['wwpns'])
+        if not has_paths:
             host = self._add_new_wwn_to_host(
                 common, host, connector['wwpns'], remote_client)
-            return host, cpg
+
+        return host, cpg
 
     def _add_new_wwn_to_host(self, common, host, wwns, remote_client=None):
         """Add wwns to a host if one or more don't exist.

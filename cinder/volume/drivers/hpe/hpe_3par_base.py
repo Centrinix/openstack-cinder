@@ -31,6 +31,7 @@ except ImportError:
     hpeexceptions = None
 
 from oslo_log import log as logging
+from oslo_utils.excutils import save_and_reraise_exception
 
 from cinder import coordination
 from cinder import exception
@@ -41,6 +42,10 @@ from cinder.volume.drivers.san import san
 from cinder.volume import volume_utils
 
 LOG = logging.getLogger(__name__)
+
+# 3PAR error code constants returned from hpe3parclient
+EXISTENT_PATH = 73
+EXISTENT_HOST = 16
 
 
 class HPE3PARDriverBase(driver.ManageableVD,
@@ -379,6 +384,77 @@ class HPE3PARDriverBase(driver.ManageableVD,
 
     def initialize_connection(self, volume, connector):
         pass
+
+    def _create_3par_host(self, common, hostname, domain, volume,
+                          remote_client=None, iqns=None, wwns=None):
+        """Create a 3PAR host.
+
+        Create a 3PAR host and return it and whether it has all the requested
+        iqns and wwns.
+
+        The iqns/wwns take precedence over the hostname, which is only used if
+        no host already have them assigned.
+
+        If there is already a host on the 3par using the same iqn/wwn but with
+        a different hostname the method returns the host used by 3PAR and
+        whether this host has all the iqns/wwns or not.
+
+        The method is expected to only receive iqns or wwns, since we have the
+        Cinder drivers split by transport protocol.
+        """
+        def get_host(client_obj, iqns, wwns):
+            hosts = client_obj.queryHost(iqns=iqns, wwns=wwns)
+            if hosts and hosts['members'] and 'name' in hosts['members'][0]:
+                return hosts['members'][0]
+            return None
+
+        # first search for an existing host
+        client_obj = remote_client if remote_client else common.client
+        # The host does an OR of the iqns/wwns, so we could be missing some
+        host = get_host(client_obj, iqns, wwns)
+
+        # We couldn't find it by iqn/wwns, assume it doesn't exist and try to
+        # create it.
+        if host is None:
+            # get persona from the volume type extra specs
+            persona_id = int(common.get_persona_type(volume))
+            try:
+                client_obj.createHost(hostname, iscsiNames=iqns, FCWwns=wwns,
+                                      optional={'domain': domain,
+                                                'persona': persona_id})
+                host = client_obj.getHost(hostname)
+                # Return True, since we created the host it has the iqns/wwns
+                return host, True
+            except hpeexceptions.HTTPConflict as path_conflict:
+                with save_and_reraise_exception(reraise=False) as ctxt:
+                    error_code = path_conflict.get_code()
+                    # Race condition where another host now has the iqns/wwns
+                    if error_code == EXISTENT_PATH:
+                        host = get_host(client_obj, iqns, wwns)
+
+                    # The host exists without the iqns/wwns we want, or there
+                    # was a race condition and it was created simultaneously
+                    # (by another thread of this backend or by a different
+                    # backend).
+                    elif error_code == EXISTENT_HOST:
+                        host = client_obj.getHost(hostname) or {}
+
+                    if not host:
+                        ctxt.reraise = True
+                        msg = "Create %s host caught HTTP conflict code: %s"
+                        LOG.exception(msg,
+                                      'iSCSI' if iqns else 'FC', error_code)
+
+        # Check if we have the info (was created simultaneously)
+        # IQNs are case sensitive, WWNs aren't
+        iqn_paths = (p['name'] for p in host.get('iSCSIPaths', []))
+        wwn_paths = (p['wwn'].lower() for p in host.get('FCPaths', []))
+
+        iqns_ok = not iqns or set(iqns).issubset(iqn_paths)
+        wwns_ok = (not wwns or
+                   set(wwn.lower() for wwn in wwns).issubset(wwn_paths))
+        has_paths = iqns_ok and wwns_ok
+        return host, has_paths
 
     @volume_utils.trace
     def _init_vendor_properties(self):

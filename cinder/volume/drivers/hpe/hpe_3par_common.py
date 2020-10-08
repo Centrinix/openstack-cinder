@@ -1502,25 +1502,6 @@ class HPE3PARCommon(object):
     def _delete_3par_host(self, hostname, client_obj):
         client_obj.deleteHost(hostname)
 
-    def _get_prioritized_host_on_3par(self, host, hosts, hostname):
-        # Check whether host with wwn/iqn of initiator present on 3par
-        if hosts and hosts['members'] and 'name' in hosts['members'][0]:
-            # Retrieving 'host' and 'hosts' from 3par using hostname
-            # and wwn/iqn respectively. Compare hostname of 'host' and 'hosts',
-            # if they do not match it means 3par has a pre-existing host
-            # with some other name.
-            if host['name'] != hosts['members'][0]['name']:
-                hostname = hosts['members'][0]['name']
-                LOG.info(("Prioritize the host retrieved from wwn/iqn "
-                          "Hostname : %(hosts)s  is used instead "
-                          "of Hostname: %(host)s"),
-                         {'hosts': hostname,
-                          'host': host['name']})
-                host = self._get_3par_host(hostname)
-                return host, hostname
-
-        return host, hostname
-
     def _create_3par_vlun(self, volume, hostname, nsp, lun_id=None,
                           remote_client=None):
         try:
