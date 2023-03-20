@@ -12,12 +12,17 @@
 """
 Handles all requests related to user facing messages.
 """
+
+from __future__ import annotations
+
 import datetime
+from typing import Any, Iterable, Optional  # noqa: H301
 
 from oslo_config import cfg
 from oslo_log import log as logging
 from oslo_utils import timeutils
 
+from cinder import context
 from cinder.db import base
 from cinder.message import message_field
 
@@ -54,9 +59,14 @@ class API(base.Base):
 
     """
 
-    def create(self, context, action,
-               resource_type=message_field.Resource.VOLUME,
-               resource_uuid=None, exception=None, detail=None, level="ERROR"):
+    def create(self,
+               context: context.RequestContext,
+               action: Optional[tuple[str, str]],
+               resource_type: str = message_field.Resource.VOLUME,
+               resource_uuid: Optional[str] = None,
+               exception: Optional[BaseException] = None,
+               detail: Optional[tuple[str, str]] = None,
+               level: str = "ERROR") -> None:
         """Create a message record with the specified information.
 
         :param context: current context object
@@ -111,8 +121,11 @@ class API(base.Base):
             LOG.exception("Failed to create message record "
                           "for request_id %s", context.request_id)
 
-    def create_from_request_context(self, context, exception=None,
-                                    detail=None, level="ERROR"):
+    def create_from_request_context(self,
+                                    context: context.RequestContext,
+                                    exception: Optional[BaseException] = None,
+                                    detail: Optional[tuple[str, str]] = None,
+                                    level: str = "ERROR") -> None:
         """Create a message record with the specified information.
 
         :param context:
@@ -145,13 +158,19 @@ class API(base.Base):
                     detail=detail,
                     level=level)
 
-    def get(self, context, id):
+    def get(self, context: context.RequestContext, id: str):
         """Return message with the specified id."""
         return self.db.message_get(context, id)
 
-    def get_all(self, context, filters=None, marker=None,
-                limit=None, offset=None, sort_keys=None,
-                sort_dirs=None):
+    def get_all(self,
+                context: context.RequestContext,
+                filters: Optional[dict[str, Any]] = None,
+                marker: Optional[str] = None,
+                limit: Optional[int] = None,
+                offset: Optional[int] = None,
+                sort_keys: Optional[Iterable[str]] = None,
+                sort_dirs: Optional[Iterable[str]] = None) \
+            -> list[dict[str, Any]]:
         """Return all messages for the given context."""
 
         filters = filters or {}
@@ -162,12 +181,13 @@ class API(base.Base):
                                            sort_dirs=sort_dirs)
         return messages
 
-    def delete(self, context, id):
+    def delete(self, context: context.RequestContext, id: str):
         """Delete message with the specified id."""
         ctx = context.elevated()
         return self.db.message_destroy(ctx, id)
 
-    def cleanup_expired_messages(self, context):
+    def cleanup_expired_messages(self,
+                                 context: context.RequestContext) -> None:
         ctx = context.elevated()
         count = self.db.cleanup_expired_messages(ctx)
         LOG.info("Deleted %s expired messages.", count)

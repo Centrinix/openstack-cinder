@@ -95,7 +95,7 @@ class RequestContext(context.RequestContext):
                  user_auth_plugin=None,
                  message_resource_id = None,
                  message_resource_type = None,
-                 message_action = None,
+                 message_action: Optional[tuple[str, str]] = None,
                  **kwargs):
         """Initialize RequestContext.
 

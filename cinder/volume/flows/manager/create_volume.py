@@ -397,7 +397,7 @@ class CreateVolumeFromSpecTask(flow_utils.CinderTask):
         self.db = db
         self.driver = driver
         self.image_volume_cache = image_volume_cache
-        self._message = None
+        self._message: Optional[message_api.API] = None
 
     @property
     def message(self):

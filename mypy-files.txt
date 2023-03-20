@@ -20,6 +20,9 @@ cinder/image/image_utils.py
 cinder/keymgr/transfer.py
 cinder/exception.py
 cinder/manager.py
+cinder/message/api.py
+cinder/message/defined_messages.py
+cinder/message/message_field.py
 cinder/objects/backup.py
 cinder/policy.py
 cinder/scheduler/base_handler.py
