@@ -110,9 +110,10 @@ class API(base.Base):
                           'resource_uuid': resource_uuid,
                           'action_id': action[0] if action else '',
                           'message_level': level,
-                          'event_id': "VOLUME_%s_%s_%s" % (resource_type,
-                                                           action[0],
-                                                           detail_id),
+                          'event_id': "VOLUME_%s_%s_%s" % (
+                              resource_type,
+                              action[0] if action else '000',
+                              detail_id),
                           'detail_id': detail_id,
                           'expires_at': expires_at}
         try:

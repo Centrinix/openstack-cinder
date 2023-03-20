@@ -33,6 +33,7 @@ class Resource(object):
 
 class Action(object):
 
+    UNKNOWN = ('000', _('unknown action'))
     SCHEDULE_ALLOCATE_VOLUME = ('001', _('schedule allocate volume'))
     ATTACH_VOLUME = ('002', _('attach volume'))
     COPY_VOLUME_TO_IMAGE = ('003', _('copy volume to image'))
@@ -51,7 +52,8 @@ class Action(object):
     BACKUP_RESTORE = ('015', _('restore backup'))
     REIMAGE_VOLUME = ('016', _('reimage volume'))
 
-    ALL = (SCHEDULE_ALLOCATE_VOLUME,
+    ALL = (UNKNOWN,
+           SCHEDULE_ALLOCATE_VOLUME,
            ATTACH_VOLUME,
            COPY_VOLUME_TO_IMAGE,
            UPDATE_ATTACHMENT,
