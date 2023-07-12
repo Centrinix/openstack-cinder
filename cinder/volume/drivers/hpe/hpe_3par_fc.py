@@ -209,7 +209,7 @@ class HPE3PARFCDriver(hpebasedriver.HPE3PARDriverBase):
         LOG.debug("volume id: %(volume_id)s",
                   {'volume_id': volume['id']})
         array_id = self.get_volume_replication_driver_data(volume)
-        common = self._login(array_id=array_id)
+        common = self._login(array_id=array_id, spawn_common=True)
         try:
             # we have to make sure we have a host
             host, cpg = self._create_host(common, volume, connector)
@@ -298,7 +298,7 @@ class HPE3PARFCDriver(hpebasedriver.HPE3PARDriverBase):
     def terminate_connection(self, volume, connector, **kwargs):
         """Driver entry point to detach a volume from an instance."""
         array_id = self.get_volume_replication_driver_data(volume)
-        common = self._login(array_id=array_id)
+        common = self._login(array_id=array_id, spawn_common=True)
         try:
             is_force_detach = connector is None
 

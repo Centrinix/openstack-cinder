@@ -77,28 +77,38 @@ class HPE3PARDriverBase(driver.ManageableVD,
     def get_driver_options():
         return hpecommon.HPE3PARCommon.get_driver_options()
 
-    def _init_common(self):
-        self.common = hpecommon.HPE3PARCommon(self.configuration,
-                                              self._active_backend_id)
-        return self.common
+    def _init_common(self, spawn_common=False):
+        common = hpecommon.HPE3PARCommon(self.configuration,
+                                         self._active_backend_id)
+        if spawn_common is True:
+            if self.common is None:
+                self.common = common
+            return common
+        self.common = common
+        return common
 
-    def _login(self, timeout=None, array_id=None):
-        self.common = self._init_common()
+    def _login(self, timeout=None, array_id=None, spawn_common=False):
+        common = self._init_common(spawn_common)
         # If replication is enabled and we cannot login, we do not want to
         # raise an exception so a failover can still be executed.
         try:
-            self.common.do_setup(None, timeout=timeout, stats=self._stats,
-                                 array_id=array_id)
-            self.common.client_login()
+            common.do_setup(None, timeout=timeout, stats=self._stats,
+                            array_id=array_id)
+            common.client_login()
         except Exception:
-            if self.common._replication_enabled:
+            if common._replication_enabled:
                 LOG.warning("The primary array is not reachable at this "
                             "time. Since replication is enabled, "
                             "listing replication targets and failing over "
                             "a volume can still be performed.")
             else:
                 raise
-        return self.common
+        if spawn_common is True:
+            if self.common is None:
+                self.common = common
+            return common
+        self.common = common
+        return common
 
     def _logout(self, common):
         # If replication is enabled and we do not have a client ID, we did not
