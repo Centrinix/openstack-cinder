@@ -92,6 +92,10 @@ hpe3par_opts = [
                     "\n       https://<3par ip>:8080/api/v1 "
                     "\n       Example 2: for Primera/Alletra 9k, URL is: "
                     "\n       https://<primera ip>:443/api/v1"),
+    cfg.BoolOpt('hpe3par_suppress_ssl_warnings',
+                default=True,
+                help="Suppress WSAPI server HTTPS SSL certificate "
+                     "verification warnings."),
     cfg.StrOpt('hpe3par_username',
                default='',
                help="3PAR/Primera/Alletra 9k username with the 'edit' role"),
@@ -401,7 +405,9 @@ class HPE3PARCommon(object):
 
     def _create_client(self, timeout=None):
         hpe3par_api_url = self._client_conf['hpe3par_api_url']
-        cl = client.HPE3ParClient(hpe3par_api_url, timeout=timeout)
+        suppress_ssl_warnings = self.config.hpe3par_suppress_ssl_warnings
+        cl = client.HPE3ParClient(hpe3par_api_url, timeout=timeout,
+                 suppress_ssl_warnings=suppress_ssl_warnings)
         client_version = hpe3parclient.version
 
         if client_version < MIN_CLIENT_VERSION:
@@ -433,7 +439,9 @@ class HPE3PARCommon(object):
 
     def _create_replication_client(self, remote_array):
         try:
-            cl = client.HPE3ParClient(remote_array['hpe3par_api_url'])
+            suppress_ssl_warnings = self.config.suppress_ssl_warnings
+            cl = client.HPE3ParClient(remote_array['hpe3par_api_url'],
+                     suppress_ssl_warnings=suppress_ssl_warnings)
             cl.login(remote_array['hpe3par_username'],
                      remote_array['hpe3par_password'])
         except hpeexceptions.HTTPUnauthorized as ex:
